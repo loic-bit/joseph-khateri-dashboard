@@ -1905,22 +1905,21 @@ function renderDials() {
 
   const outbound  = dials.filter(d => fv(d,'Direction') === 'Outbound').length;
   const inbound   = dials.filter(d => fv(d,'Direction') === 'Inbound').length;
-  // F3: GHL leaves Status blank on most dials. Treat a call with real talk time as connected,
-  // otherwise connect rate reads 0% even with hours of talk time logged.
-  const isConnected = d => {
-    const st = fv(d,'Status');
-    if (st === 'answered' || st === 'completed') return true;
-    if (!st && (fv(d,'Duration (sec)') || 0) > 0) return true;
-    return false;
-  };
-  const connected = dials.filter(isConnected).length;
-  const cRate     = outbound > 0 ? Math.min(connected / outbound, 1) : 0;
+  // A real pickup = a human conversation, NOT a voicemail box. Voicemails auto-answer and log a
+  // few seconds (in the data ~53% of dials last 1-15s = voicemail), so counting any answered /
+  // duration>0 call massively overcounts connect rate (~67% -> mostly voicemail). Only count a
+  // dial as a pickup if it ran longer than this threshold.
+  const CONNECT_MIN_SEC = 60;   // raise to tighten (e.g. 90/120); one number drives the whole tab
+  const isPickup  = d => (fv(d,'Duration (sec)') || 0) > CONNECT_MIN_SEC;
+  const connected = dials.filter(d => fv(d,'Direction') === 'Outbound' && isPickup(d)).length;
+  const cRate     = outbound > 0 ? connected / outbound : 0;
   const totalSec  = dials.reduce((s,d) => s+(fv(d,'Duration (sec)')||0), 0);
 
   document.getElementById('dials-summary').innerHTML = [
     kpiCard({ label: 'Total Dials', value: F.num(dials.length) }),
     kpiCard({ label: 'Outbound', value: F.num(outbound), sub: `${F.num(inbound)} inbound` }),
-    kpiCard({ label: 'Connect Rate', value: F.pct(cRate), sub: `${connected} connected`, goalPct: cRate, goalLabel: 'Connect rate' }),
+    kpiCard({ label: 'Connect Rate', value: F.pct(cRate), sub: `${F.num(connected)} real pickups · voicemail excluded (>${CONNECT_MIN_SEC}s)`,
+      tip: `A pickup counts only if the call ran longer than ${CONNECT_MIN_SEC}s, which filters out voicemail boxes that auto-answer and log a few seconds.` }),
     kpiCard({ label: 'Total Talk Time', value: fmtMinutes(Math.round(totalSec/60)), sub: 'All calls' }),
   ].join('');
 
